@@ -1,43 +1,61 @@
-clc; close all;
+clc;
+close all;
 
-%% =========================
-% LOAD AGENT
-%% =========================
-load('trainedAgent_SAC.mat','agent');
+%% =====================================================
+% LOAD TRAINED AGENT
+%% =====================================================
+load('trainedAgent_FINAL.mat','agent');
 
-agentObj = agent;
+%% =====================================================
+% ASSIGN TO SIMULINK
+%% =====================================================
+assignin('base','agentObj',agent);
 
-%% =========================
-% SELECT DISTURBANCE
-%% =========================
-case_id = 20;
+%% =====================================================
+% TEST DISTURBANCE
+%% =====================================================
+case_id = 30;
 
 assignin('base','case_id',case_id);
 
-%% =========================
-% RUN MODEL
-%% =========================
-simOut = sim("ProblemStatewithRL");
+%% =====================================================
+% RUN SIMULATION
+%% =====================================================
+simOut = sim('ProblemStatewithRL');
 
-%% =========================
-% EXTRACT DATA
-%% =========================
-y = simOut.y_rl;
-t = simOut.tout;
+%% =====================================================
+% GET RESPONSE
+%% =====================================================
+data = simOut.logsout.getElement('Actual Response');
 
-%% =========================
+y = data.Values.Data;
+
+t = data.Values.Time;
+
+%% =====================================================
+% SETPOINT
+%% =====================================================
+sp = 900;
+
+%% =====================================================
 % PLOT
-%% =========================
+%% =====================================================
 figure
 
 plot(t,y,'LineWidth',2)
+
 hold on
 
-yline(900,'--r','Setpoint')
+yline(sp,'--r','Setpoint')
 
 grid on
 
 xlabel('Time (sec)')
-ylabel('Output')
 
-title(['RL Controller Response - Disturbance ',num2str(case_id),'%'])
+ylabel('Response')
+
+title(['RL Response | Disturbance = ' num2str(case_id)])
+
+legend('Response','Setpoint')
+
+run('evaluate_agent.m');

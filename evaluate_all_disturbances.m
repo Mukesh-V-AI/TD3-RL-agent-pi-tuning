@@ -1,115 +1,116 @@
-clc; close all;
+clc;
+close all;
 
-%% =========================
+%% =====================================================
 % LOAD AGENT
-%% =========================
+%% =====================================================
 load('trainedAgent_SAC.mat','agent');
 
-agentObj = agent;
+assignin('base','agent',agent);
 
-setpoint = 900;
-
-%% =========================
-% TEST CASES
-%% =========================
+%% =====================================================
+% DISTURBANCE CASES
+%% =====================================================
 cases = [5 10 15 20 30 99];
 
-results = [];
+%% =====================================================
+% SETPOINT
+%% =====================================================
+sp = 900;
 
-figure
-hold on
+%% =====================================================
+% RESULT STORAGE
+%% =====================================================
+Results = [];
 
-%% =========================
-% LOOP
-%% =========================
+%% =====================================================
+% LOOP THROUGH DISTURBANCES
+%% =====================================================
 for i = 1:length(cases)
 
     case_id = cases(i);
 
     assignin('base','case_id',case_id);
 
-    simOut = sim("ProblemStatewithRL");
+    fprintf('\n====================================\n');
+    fprintf('TESTING DISTURBANCE = %d\n',case_id);
+    fprintf('====================================\n');
 
-    y = simOut.y_rl;
-    t = simOut.tout;
+    %% RUN SIMULATION
+    simOut = sim('ProblemStatewithRL');
 
-    [OS, US, Ts, Err] = get_metrics(y,t,setpoint);
+    %% GET RESPONSE
+    data = simOut.logsout.getElement('Actual Response');
 
-    results = [results;
+    y = data.Values.Data;
+
+    t = data.Values.Time;
+
+    %% METRICS
+    [OS,US,Ts,Err] = get_metrics(y,t,sp);
+
+    %% STORE
+    Results = [Results;
         case_id OS US Ts Err];
+
+    %% PLOT
+    figure
 
     plot(t,y,'LineWidth',2)
 
+    hold on
+
+    yline(sp,'--r','Setpoint')
+
+    grid on
+
+    xlabel('Time (sec)')
+
+    ylabel('Response')
+
+    title(['Disturbance = ' num2str(case_id)])
+
 end
 
-%% =========================
-% GRAPH
-%% =========================
-yline(setpoint,'--k','Setpoint')
+%% =====================================================
+% FINAL TABLE
+%% =====================================================
+ResultsTable = array2table(Results, ...
+    'VariableNames', ...
+    {'Disturbance',...
+     'Overshoot',...
+     'Undershoot',...
+     'SettlingTime',...
+     'SteadyStateError'});
 
-legend("5%","10%","15%","20%","30%","Large Step")
+disp(' ')
+disp('===== FINAL PERFORMANCE TABLE =====')
+disp(ResultsTable)
 
-grid on
-
-xlabel("Time")
-ylabel("Output")
-
-title("Final RL Performance")
-
-%% =========================
-% TABLE
-%% =========================
-resultsTable = array2table(results,...
-    'VariableNames',{'Case','OS','US','Ts','Error'});
-
-disp(resultsTable)
-
-%% =========================
-% BAR GRAPH
-%% =========================
-figure
-
-subplot(2,2,1)
-bar(results(:,2))
-title("Overshoot")
-
-subplot(2,2,2)
-bar(results(:,3))
-title("Undershoot")
-
-subplot(2,2,3)
-bar(results(:,4))
-title("Settling Time")
-
-subplot(2,2,4)
-bar(results(:,5))
-title("Error")
-
-%% =========================
-% METRICS
-%% =========================
-function [OS, US, Ts, Err] = get_metrics(y,t,sp)
+%% =====================================================
+% METRIC FUNCTION
+%% =====================================================
+function [OS,US,Ts,Err] = get_metrics(y,t,sp)
 
 OS = max(0,(max(y)-sp)/sp*100);
 
-idx = find(y > 0.9*sp,1);
-
-if isempty(idx)
-    US = 100;
-else
-    US = max(0,(sp-min(y(idx:end)))/sp*100);
-end
+US = max(0,(sp-min(y))/sp*100);
 
 Err = abs(y(end)-sp);
 
-tol = 0.01*sp;
+%% 1% settling band
+band = 0.01*sp;
 
-idx2 = find(abs(y-sp) > tol);
+idx = find(abs(y-sp) > band);
 
-if isempty(idx2)
+if isempty(idx)
+
     Ts = 0;
+
 else
-    Ts = t(max(idx2));
+
+    Ts = t(max(idx));
+
 end
 
 end

@@ -2,245 +2,315 @@ clc;
 clear;
 close all;
 
-%% =========================================================
+%% =====================================================
+% HYBRID CURRICULUM SAC TRAINING
+% LOW SETTLING TIME + ROBUSTNESS
+%% =====================================================
+
+%% =====================================================
 % MODEL
-%% =========================================================
-mdl = "ProblemStatewithRL";
+%% =====================================================
+mdl = 'ProblemStatewithRL';
 
 open_system(mdl)
 
-agentBlk = mdl + "/RL Agent";
+agentBlk = [mdl '/RL Agent'];
 
-%% =========================================================
+%% =====================================================
+% STAGED DISTURBANCES
+%% =====================================================
+curriculumCases = [5 10 15 20 30 99];
+
+%% =====================================================
+% EPISODES
+%% =====================================================
+curriculumEpisodes = [80 60 60 50 40 30];
+
+%% =====================================================
 % OBSERVATION SPACE
-%% =========================================================
-obsInfo = rlNumericSpec([5 1], ...
-    LowerLimit=-inf*ones(5,1), ...
-    UpperLimit= inf*ones(5,1));
+% [e de y sp ie]
+%% =====================================================
+obsInfo = rlNumericSpec([5 1]);
 
-obsInfo.Name = "observations";
+obsInfo.Name = 'observations';
 
-%% =========================================================
+%% =====================================================
 % ACTION SPACE
-%% =========================================================
+%% =====================================================
 actInfo = rlNumericSpec([2 1], ...
     LowerLimit=[-1;-1], ...
     UpperLimit=[1;1]);
 
-actInfo.Name = "actions";
+actInfo.Name = 'actions';
 
-%% =========================================================
+%% =====================================================
 % ENVIRONMENT
-%% =========================================================
+%% =====================================================
 env = rlSimulinkEnv( ...
     mdl, ...
     agentBlk, ...
     obsInfo, ...
     actInfo);
 
-%% =========================================================
-% RANDOM DISTURBANCE RESET
-%% =========================================================
-env.ResetFcn = @localResetFcn;
-
-%% =========================================================
+%% =====================================================
 % ACTOR NETWORK
-%% =========================================================
+%% =====================================================
 statePath = [
 
     featureInputLayer(5,...
-        Normalization="none",...
-        Name="state")
+    Normalization="none",...
+    Name="state")
 
     fullyConnectedLayer(256,...
-        Name="fc1")
+    Name="actorFC1")
 
-    reluLayer(Name="relu1")
+    reluLayer(...
+    Name="actorRelu1")
 
     fullyConnectedLayer(256,...
-        Name="fc2")
+    Name="actorFC2")
 
-    reluLayer(Name="relu2")
+    reluLayer(...
+    Name="actorRelu2")
 ];
 
-%% =========================================================
+%% =====================================================
 % MEAN PATH
-%% =========================================================
+%% =====================================================
 meanPath = [
 
     fullyConnectedLayer(2,...
-        Name="mean")
+    Name="mean")
 ];
 
-%% =========================================================
+%% =====================================================
 % STD PATH
-%% =========================================================
+%% =====================================================
 stdPath = [
 
     fullyConnectedLayer(2,...
-        Name="std")
+    Name="std")
 
-    softplusLayer(Name="softplus")
+    softplusLayer(...
+    Name="softplus")
 ];
 
-%% =========================================================
-% ACTOR GRAPH
-%% =========================================================
-actorLG = layerGraph(statePath);
+%% =====================================================
+% CREATE ACTOR GRAPH
+%% =====================================================
+actorNet = layerGraph(statePath);
 
-actorLG = addLayers(actorLG,meanPath);
-actorLG = addLayers(actorLG,stdPath);
+actorNet = addLayers(actorNet,meanPath);
 
-actorLG = connectLayers(actorLG,...
-    "relu2","mean");
+actorNet = addLayers(actorNet,stdPath);
 
-actorLG = connectLayers(actorLG,...
-    "relu2","std");
+%% =====================================================
+% CONNECT ACTOR
+%% =====================================================
+actorNet = connectLayers(actorNet,...
+    "actorRelu2","mean");
 
-%% =========================================================
-% ACTOR NETWORK
-%% =========================================================
-actorNet = dlnetwork(actorLG);
+actorNet = connectLayers(actorNet,...
+    "actorRelu2","std");
 
-%% =========================================================
-% SAC ACTOR
-%% =========================================================
+%% =====================================================
+% DL NETWORK
+%% =====================================================
+actorNet = dlnetwork(actorNet);
+
+%% =====================================================
+% ACTOR
+%% =====================================================
 actor = rlContinuousGaussianActor( ...
-    actorNet,...
-    obsInfo,...
-    actInfo,...
-    ActionMeanOutputNames="mean",...
+    actorNet, ...
+    obsInfo, ...
+    actInfo, ...
+    ActionMeanOutputNames="mean", ...
     ActionStandardDeviationOutputNames="softplus");
 
-%% =========================================================
-% CRITIC NETWORK
-%% =========================================================
+%% =====================================================
+% CRITIC STATE PATH
+%% =====================================================
 statePathC = [
 
     featureInputLayer(5,...
-        Normalization="none",...
-        Name="state")
+    Normalization="none",...
+    Name="state")
 
     fullyConnectedLayer(256,...
-        Name="c_fc1")
+    Name="stateFC1")
 
-    reluLayer(Name="c_relu1")
+    reluLayer(...
+    Name="stateRelu1")
 
     fullyConnectedLayer(256,...
-        Name="c_fc2")
-
-    reluLayer(Name="c_relu2")
+    Name="stateFC2")
 ];
 
-%% =========================================================
+%% =====================================================
 % ACTION PATH
-%% =========================================================
+%% =====================================================
 actionPathC = [
 
     featureInputLayer(2,...
-        Normalization="none",...
-        Name="action")
+    Normalization="none",...
+    Name="action")
 
     fullyConnectedLayer(256,...
-        Name="a_fc1")
+    Name="actionFC1")
 ];
 
-%% =========================================================
+%% =====================================================
 % COMMON PATH
-%% =========================================================
+%% =====================================================
 commonPath = [
 
     additionLayer(2,...
-        Name="add")
+    Name="add")
 
-    reluLayer(Name="common_relu")
+    reluLayer(...
+    Name="commonRelu")
 
     fullyConnectedLayer(1,...
-        Name="QValue")
+    Name="QValue")
 ];
 
-%% =========================================================
-% CRITIC GRAPH
-%% =========================================================
-criticLG = layerGraph();
+%% =====================================================
+% CREATE CRITIC GRAPH
+%% =====================================================
+criticNet = layerGraph();
 
-criticLG = addLayers(criticLG,statePathC);
-criticLG = addLayers(criticLG,actionPathC);
-criticLG = addLayers(criticLG,commonPath);
+criticNet = addLayers(criticNet,statePathC);
 
-criticLG = connectLayers(criticLG,...
-    "c_relu2","add/in1");
+criticNet = addLayers(criticNet,actionPathC);
 
-criticLG = connectLayers(criticLG,...
-    "a_fc1","add/in2");
+criticNet = addLayers(criticNet,commonPath);
 
-%% =========================================================
+%% =====================================================
+% CONNECT CRITIC
+%% =====================================================
+criticNet = connectLayers(criticNet,...
+    "stateFC2","add/in1");
+
+criticNet = connectLayers(criticNet,...
+    "actionFC1","add/in2");
+
+%% =====================================================
 % CRITIC 1
-%% =========================================================
-criticNet1 = dlnetwork(criticLG);
+%% =====================================================
+criticNet1 = dlnetwork(criticNet);
 
 critic1 = rlQValueFunction( ...
-    criticNet1,...
-    obsInfo,...
+    criticNet1, ...
+    obsInfo, ...
     actInfo);
 
-%% =========================================================
+%% =====================================================
 % CRITIC 2
-%% =========================================================
-criticNet2 = dlnetwork(criticLG);
+%% =====================================================
+criticNet2 = dlnetwork(criticNet);
 
 critic2 = rlQValueFunction( ...
-    criticNet2,...
-    obsInfo,...
+    criticNet2, ...
+    obsInfo, ...
     actInfo);
 
-%% =========================================================
+%% =====================================================
 % SAC OPTIONS
-%% =========================================================
+%% =====================================================
 agentOpts = rlSACAgentOptions;
 
 agentOpts.SampleTime = 0.01;
 
 agentOpts.DiscountFactor = 0.995;
 
+agentOpts.TargetSmoothFactor = 1e-3;
+
 agentOpts.ExperienceBufferLength = 1e6;
 
 agentOpts.MiniBatchSize = 256;
 
-agentOpts.TargetSmoothFactor = 1e-3;
+agentOpts.NumWarmStartSteps = 5000;
 
-agentOpts.NumWarmStartSteps = 15000;
-
-%% =========================================================
-% CREATE SAC AGENT
-%% =========================================================
+%% =====================================================
+% SAC AGENT
+%% =====================================================
 agent = rlSACAgent( ...
-    actor,...
-    [critic1 critic2],...
+    actor, ...
+    [critic1 critic2], ...
     agentOpts);
 
-%% =========================================================
-% TRAINING OPTIONS
-%% =========================================================
-trainOpts = rlTrainingOptions( ...
-    MaxEpisodes=300,...
-    MaxStepsPerEpisode=500,...
-    ScoreAveragingWindowLength=20,...
-    StopTrainingCriteria="none",...
-    Verbose=true,...
-    Plots="training-progress");
+%% =====================================================
+% CURRICULUM TRAINING LOOP
+%% =====================================================
+for stage = 1:length(curriculumCases)
 
-%% =========================================================
-% TRAIN AGENT
-%% =========================================================
-trainingStats = train( ...
-    agent,...
-    env,...
-    trainOpts);
+    %% =================================================
+    % DISTURBANCE
+    %% =================================================
+    case_id = curriculumCases(stage);
 
-%% =========================================================
-% SAVE AGENT
-%% =========================================================
-save('trainedAgent_SAC.mat','agent');
+    assignin('base','case_id',case_id);
 
-disp('FINAL PHYSICS-INFORMED SAC TRAINING COMPLETED');
+    %% =================================================
+    % EPISODES
+    %% =================================================
+    maxEps = curriculumEpisodes(stage);
+
+    %% =================================================
+    % DISPLAY
+    %% =================================================
+    fprintf('\n====================================\n');
+
+    fprintf('TRAINING STAGE %d\n',stage);
+
+    fprintf('DISTURBANCE = %d\n',case_id);
+
+    fprintf('EPISODES    = %d\n',maxEps);
+
+    fprintf('====================================\n');
+
+    %% =================================================
+    % TRAINING OPTIONS
+    %% =================================================
+    trainOpts = rlTrainingOptions( ...
+        MaxEpisodes=maxEps, ...
+        MaxStepsPerEpisode=500, ...
+        ScoreAveragingWindowLength=20, ...
+        StopTrainingCriteria="none", ...
+        Verbose=true, ...
+        Plots="training-progress");
+
+    %% =================================================
+    % TRAIN
+    %% =================================================
+    trainingStats = train( ...
+        agent, ...
+        env, ...
+        trainOpts);
+
+    %% =================================================
+    % SAVE STAGE
+    %% =================================================
+    save('trainedAgent_SAC.mat','agent');
+
+    stageFile = ...
+        ['trained_stage_' num2str(case_id) '.mat'];
+
+    save(stageFile,'agent');
+
+    fprintf('\nSTAGE %d COMPLETED\n',stage);
+
+end
+
+%% =====================================================
+% FINAL SAVE
+%% =====================================================
+save('trainedAgent_FINAL.mat','agent');
+
+fprintf('\n====================================\n');
+
+fprintf('FULL TRAINING COMPLETED\n');
+
+fprintf('====================================\n');
+
