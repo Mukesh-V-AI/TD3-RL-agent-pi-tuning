@@ -1,274 +1,391 @@
 clc;
-close all;
 clear;
+close all;
 
 %% =====================================================
 % LOAD TRAINED AGENT
 %% =====================================================
-load('trainedAgent_FINAL.mat','agent');
+
+load('trainedAgent_FINAL.mat');
 
 assignin('base','agentObj',agent);
 
 %% =====================================================
-% DISTURBANCE CASES
+% MODEL
 %% =====================================================
+
+mdl = 'ProblemStatewithRL';
+
+open_system(mdl)
+
+%% =====================================================
+% TEST CASES
+%% =====================================================
+
 cases = [5 10 15 20 30 99];
 
 %% =====================================================
-% SETPOINT
+% REQUIREMENTS FROM PROBLEM STATEMENT
 %% =====================================================
+
+OS_limit = [15 20 20 25 25 30];
+
+US_limit = [15 20 20 25 25 30];
+
+Ts_limit = [3 5 5 10 10 15];
+
+SST_limit = [8 8 10 10 15 15];
+
 sp = 900;
 
 %% =====================================================
 % STORAGE
 %% =====================================================
+
 Results = [];
 
-AllResponses = {};
+%% =====================================================
+% RESPONSE FIGURE
+%% =====================================================
 
-AllTimes = {};
+figure;
+hold on;
+grid on;
 
 %% =====================================================
 % MAIN LOOP
 %% =====================================================
+
 for i = 1:length(cases)
 
-    %% =================================================
-    % DISTURBANCE
-    %% =================================================
-    case_id = cases(i);
-
-    assignin('base','case_id',case_id);
+    disturbance = cases(i);
 
     fprintf('\n====================================\n');
-
-    fprintf('TESTING DISTURBANCE = %d\n',case_id);
-
+    fprintf('Testing Disturbance = %d%%\n',disturbance);
     fprintf('====================================\n');
 
-    %% =================================================
-    % RUN SIMULATION
-    %% =================================================
-    simOut = sim('ProblemStatewithRL');
+    %% ---------------------------------------------
+    % DISTURBANCE
+    %% ---------------------------------------------
 
-    %% =================================================
+    assignin('base','case_id',disturbance);
+
+    %% ---------------------------------------------
+    % RESET VARIABLES
+    %% ---------------------------------------------
+
+    assignin('base','kp_prev',85);
+
+    assignin('base','ki_prev',35);
+
+    clear gainScheduler
+
+    %% ---------------------------------------------
+    % SIMULATE
+    %% ---------------------------------------------
+
+    simOut = sim(mdl);
+
+    %% ---------------------------------------------
     % RESPONSE
-    %% =================================================
-    data = simOut.logsout.getElement('Actual Response');
+    %% ---------------------------------------------
 
-    y = data.Values.Data;
+    sig = simOut.logsout.getElement( ...
+        'Actual Response');
 
-    t = data.Values.Time;
+    y = sig.Values.Data;
 
-    %% =================================================
-    % STORE RESPONSES
-    %% =================================================
-    AllResponses{i} = y;
-
-    AllTimes{i} = t;
+    t = sig.Values.Time;
 
     %% =================================================
-    % METRICS
-    %% =================================================
-    [OS,US,Ts,Err] = get_metrics(y,t,sp);
+% STEPINFO METRICS
+%% =================================================
+
+S = stepinfo( ...
+    y, ...
+    t, ...
+    sp, ...
+    'SettlingTimeThreshold',0.01);
+
+Overshoot = S.Overshoot;
+
+Undershoot = S.Undershoot;
+
+RiseTime = S.RiseTime;
+
+SettlingTime = S.SettlingTime;
+
+%% =================================================
+% STEADY STATE TIME (0.75%)
+%% =================================================
+
+ssTol = 0.0075*sp;
+
+SteadyStateTime = NaN;
+
+for k = 1:length(y)
+
+    if all(abs(y(k:end)-sp) <= ssTol)
+
+        SteadyStateTime = t(k);
+
+        break;
+
+    end
+
+end
+
+if isnan(SteadyStateTime)
+
+    SteadyStateTime = t(end);
+
+end
+
+%% =================================================
+% STEADY STATE ERROR
+%% =================================================
+
+SSE = abs(y(end)-sp);
+
+    passOS = Overshoot <= OS_limit(i);
+
+passUS = Undershoot <= US_limit(i);
+
+passTs = SettlingTime <= Ts_limit(i);
+
+passSST = SteadyStateTime <= SST_limit(i);
+
+if passOS && passUS && ...
+   passTs && passSST
+
+    Status = "PASS";
+
+else
+
+    Status = "FAIL";
+
+end
 
     %% =================================================
     % STORE RESULTS
     %% =================================================
+
     Results = [Results;
-        case_id OS US Ts Err];
+    disturbance ...
+    Overshoot ...
+    Undershoot ...
+    RiseTime ...
+    SettlingTime ...
+    SteadyStateTime ...
+    SSE];
 
     %% =================================================
-    % INDIVIDUAL RESPONSE GRAPH
+    % STORE STATUS
     %% =================================================
-    figure
 
-    plot(t,y,'LineWidth',2)
+    StatusArray{i} = Status;
 
-    hold on
+    %% =================================================
+    % PLOT
+    %% =================================================
 
-    yline(sp,'--r','Setpoint')
-
-    grid on
-
-    xlabel('Time (sec)')
-
-    ylabel('Response')
-
-    title(['RL Response | Disturbance = ' num2str(case_id)])
-
-    legend('Response','Setpoint')
+    plot(t,y,'LineWidth',2);
 
 end
+
+%% =====================================================
+% SETPOINT
+%% =====================================================
+
+yline(sp,'k--','Setpoint');
+
+yline(1.20*sp,...
+    'r--',...
+    'OS Limit (20%)');
+
+yline(0.80*sp,...
+    'r--',...
+    'US Limit (20%)');
+
+yline(1.01*sp,...
+    'g--',...
+    '+1%');
+
+yline(0.99*sp,...
+    'g--',...
+    '-1%');
+
+yline(1.0075*sp,...
+    'm--',...
+    '+0.75%');
+
+yline(0.9925*sp,...
+    'm--',...
+    '-0.75%');
+
+xlabel('Time (sec)');
+ylabel('Response');
+
+title('Adaptive PI Controller Responses');
+
+legend( ...
+'5%', ...
+'10%', ...
+'15%', ...
+'20%', ...
+'30%', ...
+'99%', ...
+'Setpoint', ...
+'OS Limit', ...
+'US Limit', ...
+'+1%', ...
+'-1%', ...
+'+0.75%', ...
+'-0.75%');
 
 %% =====================================================
 % RESULTS TABLE
 %% =====================================================
-ResultsTable = array2table(Results,...
-    'VariableNames',...
+
+ResultsTable = table( ...
+    Results(:,1), ...
+    Results(:,2), ...
+    Results(:,3), ...
+    Results(:,4), ...
+    Results(:,5), ...
+    Results(:,6), ...
+    Results(:,7), ...
+    string(StatusArray)', ...
+    'VariableNames', ...
     {'Disturbance',...
      'Overshoot',...
      'Undershoot',...
+     'RiseTime',...
      'SettlingTime',...
-     'SteadyStateError'});
-
-disp(' ')
-
-disp('===== FINAL PERFORMANCE TABLE =====')
-
-disp(ResultsTable)
+     'SteadyStateTime',...
+     'SSE',...
+     'Status'});
 
 %% =====================================================
-% ALL RESPONSES IN ONE GRAPH
+% DISPLAY
 %% =====================================================
-figure
 
-hold on
+fprintf('\n');
+fprintf('=============================================\n');
+fprintf('        FINAL EVALUATION RESULTS\n');
+fprintf('=============================================\n\n');
 
-for i = 1:length(cases)
+disp(ResultsTable);
+ConstraintTable = table( ...
+    cases', ...
+    OS_limit', ...
+    Results(:,2), ...
+    US_limit', ...
+    Results(:,3), ...
+    Ts_limit', ...
+    Results(:,5), ...
+    SST_limit', ...
+    Results(:,6), ...
+    string(StatusArray)', ...
+    'VariableNames', ...
+    {'Disturbance',...
+     'OS_Needed',...
+     'OS_Obtained',...
+     'US_Needed',...
+     'US_Obtained',...
+     'Ts_Needed',...
+     'Ts_Obtained',...
+     'SST_Needed',...
+     'SST_Obtained',...
+     'Status'});
 
-    plot(AllTimes{i},...
-         AllResponses{i},...
-         'LineWidth',2)
+fprintf('\n');
+fprintf('====================================\n');
+fprintf('NEEDED vs OBTAINED\n');
+fprintf('====================================\n');
 
-end
-
-yline(sp,'--k','Setpoint')
-
-grid on
-
-xlabel('Time (sec)')
-
-ylabel('Response')
-
-title('All Disturbance Responses')
-
-legend('5%',...
-       '10%',...
-       '15%',...
-       '20%',...
-       '30%',...
-       '99%',...
-       'Setpoint')
-
-%% =====================================================
-% SETTLING TIME GRAPH
-%% =====================================================
-figure
-
-bar(Results(:,4))
-
-grid on
-
-xticklabels(string(cases))
-
-xlabel('Disturbance (%)')
-
-ylabel('Settling Time (sec)')
-
-title('Settling Time')
+disp(ConstraintTable);
 
 %% =====================================================
-% OVERSHOOT GRAPH
+% OVERSHOOT COMPARISON
 %% =====================================================
-figure
 
-bar(Results(:,2))
+figure;
 
-grid on
+bar(cases,Results(:,2));
 
-xticklabels(string(cases))
+grid on;
 
-xlabel('Disturbance (%)')
+xlabel('Disturbance (%)');
+ylabel('Overshoot (%)');
 
-ylabel('Overshoot (%)')
-
-title('Overshoot')
+title('Overshoot Comparison');
 
 %% =====================================================
-% UNDERSHOOT GRAPH
+% UNDERSHOOT COMPARISON
 %% =====================================================
-figure
 
-bar(Results(:,3))
+figure;
 
-grid on
+bar(cases,Results(:,3));
 
-xticklabels(string(cases))
+grid on;
 
-xlabel('Disturbance (%)')
+xlabel('Disturbance (%)');
+ylabel('Undershoot (%)');
 
-ylabel('Undershoot (%)')
-
-title('Undershoot')
+title('Undershoot Comparison');
 
 %% =====================================================
-% STEADY-STATE ERROR GRAPH
+% RISE TIME COMPARISON
 %% =====================================================
-figure
 
-bar(Results(:,5))
+figure;
 
-grid on
+bar(cases,Results(:,4));
 
-xticklabels(string(cases))
+grid on;
 
-xlabel('Disturbance (%)')
+xlabel('Disturbance (%)');
+ylabel('Rise Time (sec)');
 
-ylabel('Steady-State Error')
-
-title('Steady-State Error')
+title('Rise Time Comparison');
 
 %% =====================================================
-% METRIC FUNCTION
+% SETTLING TIME COMPARISON
 %% =====================================================
-function [OS,US,Ts,Err] = get_metrics(y,t,sp)
 
-%% =====================================================
-% OVERSHOOT
-%% =====================================================
-OS = max(0,(max(y)-sp)/sp*100);
+figure;
 
-%% =====================================================
-% UNDERSHOOT
-% Ignore startup transient
-%% =====================================================
-reachIdx = find(y >= 0.98*sp,1);
+bar(cases,Results(:,5));
 
-if isempty(reachIdx)
+grid on;
 
-    US = 0;
+xlabel('Disturbance (%)');
+ylabel('Settling Time (sec)');
 
-else
-
-    y_after = y(reachIdx:end);
-
-    us_val = min(y_after);
-
-    US = max(0,(sp-us_val)/sp*100);
-
-end
+title('Settling Time Comparison');
 
 %% =====================================================
 % STEADY STATE ERROR
 %% =====================================================
-Err = abs(y(end)-sp);
 
-%% =====================================================
-% SETTLING TIME
-%% =====================================================
-band = 0.01*sp;
+figure;
 
-idx = find(abs(y-sp) > band);
+bar(cases,Results(:,6));
 
-if isempty(idx)
+hold on;
 
-    Ts = 0;
+yline(10,...
+    'r--',...
+    'Requirement');
 
-else
+grid on;
 
-    Ts = t(max(idx)) ;
+xlabel('Disturbance (%)');
 
-end
+ylabel('Steady State Time (sec)');
 
-end
+title('Steady State Time Comparison');
+
+

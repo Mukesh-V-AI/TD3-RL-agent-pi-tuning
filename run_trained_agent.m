@@ -14,7 +14,7 @@ assignin('base','agentObj',agent);
 %% =====================================================
 % TEST DISTURBANCE
 %% =====================================================
-case_id = 30;
+case_id = 5;
 
 assignin('base','case_id',case_id);
 

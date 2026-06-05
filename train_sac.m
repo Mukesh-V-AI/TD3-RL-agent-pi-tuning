@@ -24,7 +24,7 @@ curriculumCases = [5 10 15 20 30 99];
 %% =====================================================
 % EPISODES
 %% =====================================================
-curriculumEpisodes = [80 60 60 50 40 30];
+curriculumEpisodes = [100 80 80 60 60 50];
 
 %% =====================================================
 % OBSERVATION SPACE
@@ -38,8 +38,8 @@ obsInfo.Name = 'observations';
 % ACTION SPACE
 %% =====================================================
 actInfo = rlNumericSpec([2 1], ...
-    LowerLimit=[-1;-1], ...
-    UpperLimit=[1;1]);
+    LowerLimit=[-2;-2], ...
+    UpperLimit=[2;2]);
 
 actInfo.Name = 'actions';
 
@@ -57,21 +57,33 @@ env = rlSimulinkEnv( ...
 %% =====================================================
 statePath = [
 
-    featureInputLayer(5,...
-    Normalization="none",...
-    Name="state")
+featureInputLayer(5,...
+Normalization="zscore",...
+Name="state")
 
-    fullyConnectedLayer(256,...
-    Name="actorFC1")
+fullyConnectedLayer(256,...
+Name="actorFC1")
 
-    reluLayer(...
-    Name="actorRelu1")
+layerNormalizationLayer(...
+Name="actorLN1")
 
-    fullyConnectedLayer(256,...
-    Name="actorFC2")
+leakyReluLayer(0.01,...
+Name="actorLRelu1")
 
-    reluLayer(...
-    Name="actorRelu2")
+fullyConnectedLayer(256,...
+Name="actorFC2")
+
+layerNormalizationLayer(...
+Name="actorLN2")
+
+leakyReluLayer(0.01,...
+Name="actorLRelu2")
+
+fullyConnectedLayer(128,...
+Name="actorFC3")
+
+leakyReluLayer(0.01,...
+Name="actorLRelu3")
 ];
 
 %% =====================================================
@@ -79,8 +91,14 @@ statePath = [
 %% =====================================================
 meanPath = [
 
-    fullyConnectedLayer(2,...
-    Name="mean")
+fullyConnectedLayer(64,...
+Name="meanFC")
+
+leakyReluLayer(0.01,...
+Name="meanRelu")
+
+fullyConnectedLayer(2,...
+Name="mean")
 ];
 
 %% =====================================================
@@ -88,11 +106,17 @@ meanPath = [
 %% =====================================================
 stdPath = [
 
-    fullyConnectedLayer(2,...
-    Name="std")
+fullyConnectedLayer(64,...
+Name="stdFC")
 
-    softplusLayer(...
-    Name="softplus")
+leakyReluLayer(0.01,...
+Name="stdRelu")
+
+fullyConnectedLayer(2,...
+Name="std")
+
+softplusLayer(...
+Name="softplus")
 ];
 
 %% =====================================================
@@ -108,11 +132,10 @@ actorNet = addLayers(actorNet,stdPath);
 % CONNECT ACTOR
 %% =====================================================
 actorNet = connectLayers(actorNet,...
-    "actorRelu2","mean");
+"actorLRelu3","meanFC");
 
 actorNet = connectLayers(actorNet,...
-    "actorRelu2","std");
-
+"actorLRelu3","stdFC");
 %% =====================================================
 % DL NETWORK
 %% =====================================================
@@ -133,18 +156,33 @@ actor = rlContinuousGaussianActor( ...
 %% =====================================================
 statePathC = [
 
-    featureInputLayer(5,...
-    Normalization="none",...
-    Name="state")
+featureInputLayer(5,...
+Normalization="zscore",...
+Name="state")
 
-    fullyConnectedLayer(256,...
-    Name="stateFC1")
+fullyConnectedLayer(256,...
+Name="stateFC1")
 
-    reluLayer(...
-    Name="stateRelu1")
+layerNormalizationLayer(...
+Name="stateLN1")
 
-    fullyConnectedLayer(256,...
-    Name="stateFC2")
+leakyReluLayer(0.01,...
+Name="stateRelu1")
+
+fullyConnectedLayer(256,...
+Name="stateFC2")
+
+layerNormalizationLayer(...
+Name="stateLN2")
+
+leakyReluLayer(0.01,...
+Name="stateRelu2")
+
+fullyConnectedLayer(128,...
+Name="stateFC3")
+
+leakyReluLayer(0.01,...
+Name="stateRelu3")
 ];
 
 %% =====================================================
@@ -152,12 +190,15 @@ statePathC = [
 %% =====================================================
 actionPathC = [
 
-    featureInputLayer(2,...
-    Normalization="none",...
-    Name="action")
+featureInputLayer(2,...
+Normalization="none",...
+Name="action")
 
-    fullyConnectedLayer(256,...
-    Name="actionFC1")
+fullyConnectedLayer(128,...
+Name="actionFC1")
+
+leakyReluLayer(0.01,...
+Name="actionRelu1")
 ];
 
 %% =====================================================
@@ -165,14 +206,23 @@ actionPathC = [
 %% =====================================================
 commonPath = [
 
-    additionLayer(2,...
-    Name="add")
+concatenationLayer(1,2,...
+Name="concat")
 
-    reluLayer(...
-    Name="commonRelu")
+fullyConnectedLayer(256,...
+Name="commonFC1")
 
-    fullyConnectedLayer(1,...
-    Name="QValue")
+leakyReluLayer(0.01,...
+Name="commonRelu1")
+
+fullyConnectedLayer(128,...
+Name="commonFC2")
+
+leakyReluLayer(0.01,...
+Name="commonRelu2")
+
+fullyConnectedLayer(1,...
+Name="QValue")
 ];
 
 %% =====================================================
@@ -190,10 +240,10 @@ criticNet = addLayers(criticNet,commonPath);
 % CONNECT CRITIC
 %% =====================================================
 criticNet = connectLayers(criticNet,...
-    "stateFC2","add/in1");
+"stateRelu3","concat/in1");
 
 criticNet = connectLayers(criticNet,...
-    "actionFC1","add/in2");
+"actionRelu1","concat/in2");
 
 %% =====================================================
 % CRITIC 1
@@ -224,13 +274,13 @@ agentOpts.SampleTime = 0.01;
 
 agentOpts.DiscountFactor = 0.995;
 
-agentOpts.TargetSmoothFactor = 1e-3;
+agentOpts.TargetSmoothFactor = 5e-3;
 
-agentOpts.ExperienceBufferLength = 1e6;
+agentOpts.ExperienceBufferLength = 2e5;
 
-agentOpts.MiniBatchSize = 256;
+agentOpts.MiniBatchSize = 128;
 
-agentOpts.NumWarmStartSteps = 5000;
+agentOpts.NumWarmStartSteps = 3000;
 
 %% =====================================================
 % SAC AGENT
@@ -250,7 +300,7 @@ for stage = 1:length(curriculumCases)
     %% =================================================
     case_id = curriculumCases(stage);
 
-    assignin('base','case_id',case_id);
+    assignin('base','case_id',case_id);        %% change this line -- PROBLEM IS HERE
 
     %% =================================================
     % EPISODES
@@ -313,4 +363,3 @@ fprintf('\n====================================\n');
 fprintf('FULL TRAINING COMPLETED\n');
 
 fprintf('====================================\n');
-
