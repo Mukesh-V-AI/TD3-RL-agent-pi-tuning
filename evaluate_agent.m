@@ -6,7 +6,7 @@ close all;
 % LOAD TRAINED AGENT
 %% =====================================================
 
-load('trainedAgent_FINAL.mat');
+load('trainedAgent_5Percent.mat');
 
 assignin('base','agentObj',agent);
 
